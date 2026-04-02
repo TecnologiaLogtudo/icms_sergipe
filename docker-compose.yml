@@ -2,21 +2,27 @@ services:
   app:
     build:
       context: .
-      dockerfile: conectividade/Dockerfile.playwright-vps
+      dockerfile: Dockerfile
     container_name: playwright-vps-app
     restart: unless-stopped
     ipc: host
     init: true
     security_opt:
-      - seccomp=conectividade/seccomp-playwright.json
+      - seccomp=seccomp-playwright.json
     env_file:
-      - conectividade/.env.playwright-vps.example
+      - .env
     environment:
-      - TZ=America/Sao_Paulo
+      - TZ=America/Bahia
+      - LOG_LEVEL=INFO
+      - PLAYWRIGHT_HEADLESS=true
+      - SCHEDULE_HOUR=8
+      - SCHEDULE_MINUTE=0
     volumes:
       - app_data:/app/data
-    ports:
-      - "8000:8000"
+      - app_logs:/app/logs
+      - app_downloads:/app/downloads
 
 volumes:
   app_data:
+  app_logs:
+  app_downloads:

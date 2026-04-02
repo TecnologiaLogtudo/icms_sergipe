@@ -2,6 +2,7 @@ import os
 import shutil
 import time
 import unicodedata
+import logging
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
@@ -15,6 +16,7 @@ from automacao.tratamento_planilha import (
 )
 from automacao.smtp_notifier import enviar_alerta_campos_st
 
+logger = logging.getLogger(__name__)
 
 MAPPINGS = carregar_mapeamento()
 URL_LOGIN = MAPPINGS["urls"]["login"]
@@ -82,7 +84,7 @@ def _clicar_botao_salvar(alvo, timeout_ms: int = 12000) -> bool:
             elemento = alvo.locator(seletor).first
             elemento.wait_for(state="visible", timeout=timeout_ms)
             elemento.click()
-            print(f"✓ Clique em 'Salvar relatório' com seletor: {seletor}")
+            logger.info("clique_salvar_relatorio_ok seletor=%s", seletor)
             return True
         except Exception:
             continue
@@ -160,6 +162,29 @@ def _limpar_pasta_temporaria(pasta_tmp: Path) -> None:
             continue
 
 
+def _deve_limpar_downloads() -> bool:
+    valor = os.getenv("LOGTUDO_CLEAN_DOWNLOADS", "true").strip().lower()
+    return valor in {"1", "true", "t", "yes", "y", "sim", "s", "on"}
+
+
+def _limpar_downloads_finais(pasta_downloads: Path, pasta_tmp: Path) -> None:
+    """
+    Remove arquivos da pasta de downloads ao fim do ciclo.
+    Mantém apenas diretórios e arquivos de controle (ex: .gitkeep).
+    """
+    for item in pasta_downloads.glob("*"):
+        if item == pasta_tmp:
+            continue
+        if item.is_dir():
+            continue
+        if item.name.lower() in {".gitkeep"}:
+            continue
+        try:
+            item.unlink()
+        except Exception as exc:
+            logger.warning("falha_remover_arquivo_download nome=%s detalhe=%s", item.name, exc)
+
+
 def _arquivo_parece_html(caminho: Path) -> bool:
     try:
         amostra = caminho.read_text(encoding="utf-8", errors="ignore")[:2000].lower()
@@ -178,17 +203,17 @@ def _converter_html_para_xlsx_csv(caminho_arquivo: Path) -> None:
     try:
         import pandas as pd
     except ImportError:
-        print("⚠ pandas não instalado. Pulando conversão para .xlsx/.csv.")
+        logger.warning("pandas_nao_instalado conversao_xlsx_csv_pulada")
         return
 
     try:
         tabelas = pd.read_html(caminho_arquivo, flavor=["lxml", "bs4"])
     except Exception as exc:
-        print(f"⚠ Não foi possível converter HTML para tabela: {exc}")
+        logger.warning("falha_converter_html_para_tabela detalhe=%s", exc)
         return
 
     if not tabelas:
-        print("⚠ Nenhuma tabela encontrada no HTML do relatório.")
+        logger.warning("nenhuma_tabela_encontrada_no_html")
         return
 
     def _normalizar_txt(valor: object) -> str:
@@ -235,7 +260,7 @@ def _converter_html_para_xlsx_csv(caminho_arquivo: Path) -> None:
             tabela = candidata.copy()
 
     if tabela is None:
-        print("⚠ Nenhuma tabela compatível com o relatório foi identificada.")
+        logger.warning("nenhuma_tabela_compativel_identificada")
         return
 
     # Em muitos relatórios, o header vem como primeira linha de dados.
@@ -247,7 +272,7 @@ def _converter_html_para_xlsx_csv(caminho_arquivo: Path) -> None:
             tabela = tabela.iloc[1:].reset_index(drop=True)
 
     if tabela.empty:
-        print("⚠ Tabela convertida vazia. Pulando exportação .xlsx/.csv.")
+        logger.warning("tabela_convertida_vazia exportacao_pulada")
         return
 
     tabela = remover_linha_final_bc_icms_st(tabela)
@@ -262,10 +287,10 @@ def _converter_html_para_xlsx_csv(caminho_arquivo: Path) -> None:
             tabela_filtro_st.to_excel(writer, sheet_name="filtro_campos_st", index=False)
     tabela.to_csv(caminho_csv, index=False, encoding="utf-8-sig", sep=";")
 
-    print(f"✓ Conversão concluída: {caminho_xlsx.resolve()}")
-    print(f"✓ Conversão concluída: {caminho_csv.resolve()}")
+    logger.info("conversao_concluida arquivo=%s", caminho_xlsx.resolve())
+    logger.info("conversao_concluida arquivo=%s", caminho_csv.resolve())
     if not tabela_filtro_st.empty:
-        print("✓ Aba adicional criada no .xlsx: filtro_campos_st")
+        logger.info("aba_adicional_criada nome=filtro_campos_st")
         enviar_alerta_campos_st(tabela_filtro_st, arquivo_origem=caminho_arquivo)
 
 
@@ -289,53 +314,53 @@ def baixar_relatorio_conhecimento(usuario: str, senha: str, headless: bool = Fal
         downloads_path=str(pasta_downloads_tmp),
         accept_downloads=True,
     )
-    print(f"Pasta de downloads configurada: {pasta_downloads.resolve()}")
+    logger.info("pasta_downloads_configurada caminho=%s", pasta_downloads.resolve())
 
     with PlaywrightVPSClient(config) as client:
         page = client.page
 
         try:
             # Realizar login
-            print("Realizando login...")
+            logger.info("realizando_login")
             page.goto(URL_LOGIN, wait_until="domcontentloaded")
             page.locator(MAPPINGS["selectors"]["campo_usuario"]).fill(usuario)
             page.locator(MAPPINGS["selectors"]["campo_senha"]).fill(senha)
             page.locator(MAPPINGS["selectors"]["botao_entrar"]).click()
             
             # Aguardar a navegação após login
-            print("  Aguardando navegação pós-login...")
+            logger.info("aguardando_navegacao_pos_login")
             try:
                 page.wait_for_load_state("load", timeout=15000)
             except:
-                print("  ⚠ Timeout no 'load', continuando mesmo assim...")
+                logger.warning("timeout_load_pos_login continuando")
             
             time.sleep(3)
-            print("✓ Login realizado com sucesso!")
+            logger.info("login_realizado_com_sucesso")
 
             # Aguardar página principal renderizar completamente
-            print("Aguardando página principal renderizar...")
+            logger.info("aguardando_pagina_principal_renderizar")
             time.sleep(2)
 
             # Navegar para URL do relatório
-            print(f"Navegando para URL do relatório...")
+            logger.info("navegando_para_url_relatorio")
             page.goto(URL_RELATORIO, wait_until="domcontentloaded")
             
             # Aguardar página carregar (sem waiting por networkidle que pode travar)
-            print("  Aguardando página carregar...")
+            logger.info("aguardando_pagina_relatorio_carregar")
             try:
                 page.wait_for_load_state("load", timeout=15000)
             except:
-                print("  ⚠ Timeout no 'load', continuando mesmo assim...")
+                logger.warning("timeout_load_relatorio continuando")
             
             time.sleep(3)
-            print("✓ Página do relatório carregada!")
+            logger.info("pagina_relatorio_carregada")
 
             # Aguardar o formulário estar pronto
-            print("Aguardando formulário estar pronto...")
+            logger.info("aguardando_formulario_pronto")
             time.sleep(3)
 
             # Clicar no botão "Gerar Relatório"
-            print("Clicando no botão 'Gerar Relatório'...")
+            logger.info("clicando_botao_gerar_relatorio")
             try:
                 page.locator(SEL_BOTAO_GERAR).wait_for(timeout=10000)
                 paginas_antes = set(client.context.pages) if client.context else {page}
@@ -352,49 +377,48 @@ def baixar_relatorio_conhecimento(usuario: str, senha: str, headless: bool = Fal
                                 nova.wait_for_load_state("domcontentloaded", timeout=15000)
                             except Exception:
                                 pass
-                            print(f"✓ Nova janela detectada após gerar relatório: {nova.url}")
+                            logger.info("nova_janela_detectada_apos_gerar_relatorio url=%s", nova.url)
                             break
                         time.sleep(0.4)
-                print("✓ Botão 'Gerar Relatório' clicado!")
+                logger.info("botao_gerar_relatorio_clicado")
             except Exception as e:
-                print(f"✗ Erro ao clicar no botão 'Gerar Relatório': {e}")
+                logger.exception("erro_clicar_botao_gerar_relatorio detalhe=%s", e)
                 if debug:
                     page.screenshot(path="debug_botao_gerar.png")
-                    print("  Screenshot salvo em: debug_botao_gerar.png")
+                    logger.info("screenshot_salvo arquivo=debug_botao_gerar.png")
                 return
 
             # Aguardar o modal/popup/iframe aparecer (pode demorar enquanto processa o relatório)
-            print("Aguardando relatório aparecer (mesma página, popup/aba ou iframe)...")
-            print("  (Isto pode levar alguns segundos enquanto o servidor processa)")
+            logger.info("aguardando_superficie_relatorio popup_aba_iframe")
             pagina_relatorio = page
             frame_relatorio = None
             try:
                 pagina_relatorio, frame_relatorio = _encontrar_superficie_relatorio(client, page, timeout_ms=30000)
                 if frame_relatorio is None:
-                    print(f"✓ Área do relatório detectada na página: {pagina_relatorio.url}")
+                    logger.info("area_relatorio_detectada_pagina url=%s", pagina_relatorio.url)
                 else:
-                    print(f"✓ Área do relatório detectada em iframe: {frame_relatorio.url}")
+                    logger.info("area_relatorio_detectada_iframe url=%s", frame_relatorio.url)
                 time.sleep(2)  # Aguardar a animação do modal e conteúdo carregar
             except Exception as e:
-                print(f"⚠ Modal não detectado no tempo esperado: {e}")
+                logger.warning("modal_relatorio_nao_detectado detalhe=%s", e)
                 if debug:
-                    print("  Procurando por elementos alternativas para debug...")
+                    logger.info("debug_modal_ativo procurando_elementos")
                     page.screenshot(path="debug_modal.png")
-                    print("  Screenshot salvo em: debug_modal.png")
+                    logger.info("screenshot_salvo arquivo=debug_modal.png")
                     
                     # Tentar encontrar qualquer elemento que indique sucesso
                     try:
                         conteudo = page.content()
                         if "_bobarra" in conteudo:
-                            print("  O elemento #_bobarra está no HTML mas não está visível")
+                            logger.info("elemento_bobarra_presente_html_nao_visivel")
                         if "relatório" in conteudo.lower() or "relatorio" in conteudo.lower():
-                            print("  A palavra 'relatório' foi encontrada na página")
+                            logger.info("palavra_relatorio_encontrada_na_pagina")
                     except:
                         pass
                 # Continuar mesmo se não encontrar o seletor exato
 
             # Clicar no botão "Salvar relatório"
-            print("Clicando no botão 'Salvar relatório'...")
+            logger.info("clicando_botao_salvar_relatorio")
             try:
                 alvo = frame_relatorio if frame_relatorio is not None else pagina_relatorio
                 instante_clique = time.time()
@@ -417,7 +441,7 @@ def baixar_relatorio_conhecimento(usuario: str, senha: str, headless: bool = Fal
                         caminho_arquivo = _nome_unico(pasta_downloads / nome_sugerido)
                         download.save_as(str(caminho_arquivo))
                         caminho_final = caminho_arquivo
-                        print(f"✓ Download salvo em: {caminho_arquivo.resolve()}")
+                        logger.info("download_salvo caminho=%s", caminho_arquivo.resolve())
                     else:
                         # Fallback para casos em que o site dispara download sem evento capturável.
                         time.sleep(4)
@@ -426,11 +450,11 @@ def baixar_relatorio_conhecimento(usuario: str, senha: str, headless: bool = Fal
                             destino = _nome_unico(pasta_downloads / _nome_relatorio_padrao())
                             shutil.copy2(arquivo, destino)
                             caminho_final = destino
-                            print(f"✓ Download copiado para arquivo final: {destino.resolve()}")
+                            logger.info("download_copiado_para_arquivo_final caminho=%s", destino.resolve())
                         else:
                             destino = _salvar_html_relatorio(alvo, pasta_downloads)
                             caminho_final = destino
-                            print(f"✓ Relatório salvo a partir do HTML em: {destino.resolve()}")
+                            logger.info("relatorio_salvo_a_partir_html caminho=%s", destino.resolve())
                 else:
                     clicou = _clicar_botao_salvar(alvo, timeout_ms=12000)
                     if not clicou:
@@ -439,24 +463,29 @@ def baixar_relatorio_conhecimento(usuario: str, senha: str, headless: bool = Fal
                 if caminho_final is not None:
                     _converter_html_para_xlsx_csv(caminho_final)
             except Exception as e:
-                print(f"✗ Erro ao clicar no botão 'Salvar relatório': {e}")
+                logger.exception("erro_clicar_botao_salvar_relatorio detalhe=%s", e)
                 if debug:
                     try:
                         pagina_relatorio.screenshot(path="debug_salvar.png")
                     except Exception:
                         page.screenshot(path="debug_salvar.png")
-                    print("  Screenshot salvo em: debug_salvar.png")
+                    logger.info("screenshot_salvo arquivo=debug_salvar.png")
                 return
 
             # Aguardar o download ser processado
-            print("Aguardando processamento do relatório...")
+            logger.info("aguardando_processamento_relatorio")
             time.sleep(3)
             _limpar_pasta_temporaria(pasta_downloads_tmp)
-            print("✓ Download do relatório concluído!")
+            logger.info("download_relatorio_concluido")
             
         except Exception as e:
-            print(f"✗ Erro durante download: {e}")
+            logger.exception("erro_durante_download detalhe=%s", e)
             raise
+        finally:
+            _limpar_pasta_temporaria(pasta_downloads_tmp)
+            if _deve_limpar_downloads():
+                _limpar_downloads_finais(pasta_downloads, pasta_downloads_tmp)
+                logger.info("limpeza_pos_ciclo_downloads_concluida")
 
 
 if __name__ == "__main__":

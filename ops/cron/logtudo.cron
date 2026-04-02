@@ -1,0 +1,2 @@
+# Executa todos os dias as 08:00 (horário do servidor/VPS)
+0 8 * * * /bin/bash /opt/icms_sergipe/ops/cron/run_automacao.sh
