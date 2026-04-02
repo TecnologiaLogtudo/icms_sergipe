@@ -1,0 +1,14 @@
+{
+  "urls": {
+    "login": "https://logtudo.e-login.net/",
+    "relatorio_conhecimento": "https://logtudo.e-login.net/versoes/versao5.0/rotinas/c.php?id=trans_rel_conhecimento_formulario&menu=s&filtro=171"
+  },
+  "selectors": {
+    "campo_usuario": "input[name='usuario']",
+    "campo_senha": "input[name='senha']",
+    "botao_entrar": "#botaoSubmit",
+    "botao_gerar_relatorio": "input[name='botaoEnvio'][value='Gerar Relatório']",
+    "botao_salvar_relatorio_css": "#_bobarra > a:nth-child(4) > img",
+    "botao_salvar_relatorio_xpath": "//div[@id='_bobarra']//a[4]/img"
+  }
+}

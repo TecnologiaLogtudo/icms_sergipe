@@ -1,0 +1,22 @@
+services:
+  app:
+    build:
+      context: .
+      dockerfile: conectividade/Dockerfile.playwright-vps
+    container_name: playwright-vps-app
+    restart: unless-stopped
+    ipc: host
+    init: true
+    security_opt:
+      - seccomp=conectividade/seccomp-playwright.json
+    env_file:
+      - conectividade/.env.playwright-vps.example
+    environment:
+      - TZ=America/Sao_Paulo
+    volumes:
+      - app_data:/app/data
+    ports:
+      - "8000:8000"
+
+volumes:
+  app_data:
