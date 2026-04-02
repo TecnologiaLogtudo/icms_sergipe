@@ -1,6 +1,7 @@
 import os
 import shutil
 import time
+import unicodedata
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
@@ -8,6 +9,10 @@ from typing import Optional
 from Conectividade.playwright_vps_connect import PlaywrightVPSConfig, PlaywrightVPSClient
 from automacao.config_loader import carregar_mapeamento
 from automacao.login import realizar_login
+from automacao.tratamento_planilha import (
+    gerar_tabela_filtro_campos_st,
+    remover_linha_final_bc_icms_st,
+)
 
 
 MAPPINGS = carregar_mapeamento()
@@ -185,19 +190,81 @@ def _converter_html_para_xlsx_csv(caminho_arquivo: Path) -> None:
         print("⚠ Nenhuma tabela encontrada no HTML do relatório.")
         return
 
-    tabela = tabelas[0]
+    def _normalizar_txt(valor: object) -> str:
+        texto = "" if valor is None else str(valor)
+        texto = unicodedata.normalize("NFKD", texto)
+        texto = "".join(c for c in texto if not unicodedata.combining(c))
+        return texto.strip().lower()
+
+    headers_esperados = {
+        "emissao",
+        "ctrc",
+        "cliente",
+        "peso",
+        "remetente",
+        "c. pedido",
+        "destinatario",
+        "valor nota",
+        "cfop",
+        "cst",
+        "frete valor",
+        "bc st",
+        "aliquota icmsst",
+        "icms st",
+    }
+
+    tabela = None
+    melhor_score = -1
+    for candidata in tabelas:
+        score = 0
+
+        colunas_norm = {_normalizar_txt(c) for c in list(candidata.columns)}
+        score += len(headers_esperados.intersection(colunas_norm))
+
+        if not candidata.empty:
+            primeira_linha_norm = {_normalizar_txt(v) for v in candidata.iloc[0].tolist()}
+            score += len(headers_esperados.intersection(primeira_linha_norm))
+
+        # privilegia tabela larga (a de dados tem 14 colunas)
+        if candidata.shape[1] >= 10:
+            score += 3
+
+        if score > melhor_score:
+            melhor_score = score
+            tabela = candidata.copy()
+
+    if tabela is None:
+        print("⚠ Nenhuma tabela compatível com o relatório foi identificada.")
+        return
+
+    # Em muitos relatórios, o header vem como primeira linha de dados.
+    if not tabela.empty:
+        primeira_linha = [str(v).strip() for v in tabela.iloc[0].tolist()]
+        primeira_linha_norm = {_normalizar_txt(v) for v in primeira_linha}
+        if len(headers_esperados.intersection(primeira_linha_norm)) >= 5:
+            tabela.columns = primeira_linha
+            tabela = tabela.iloc[1:].reset_index(drop=True)
+
     if tabela.empty:
         print("⚠ Tabela convertida vazia. Pulando exportação .xlsx/.csv.")
         return
 
+    tabela = remover_linha_final_bc_icms_st(tabela)
+    tabela_filtro_st = gerar_tabela_filtro_campos_st(tabela)
+
     caminho_xlsx = _nome_unico(caminho_arquivo.with_name(f"{caminho_arquivo.stem}_convertido.xlsx"))
     caminho_csv = _nome_unico(caminho_arquivo.with_name(f"{caminho_arquivo.stem}_convertido.csv"))
 
-    tabela.to_excel(caminho_xlsx, index=False)
+    with pd.ExcelWriter(caminho_xlsx, engine="openpyxl") as writer:
+        tabela.to_excel(writer, sheet_name="dados", index=False)
+        if not tabela_filtro_st.empty:
+            tabela_filtro_st.to_excel(writer, sheet_name="filtro_campos_st", index=False)
     tabela.to_csv(caminho_csv, index=False, encoding="utf-8-sig", sep=";")
 
     print(f"✓ Conversão concluída: {caminho_xlsx.resolve()}")
     print(f"✓ Conversão concluída: {caminho_csv.resolve()}")
+    if not tabela_filtro_st.empty:
+        print("✓ Aba adicional criada no .xlsx: filtro_campos_st")
 
 
 def baixar_relatorio_conhecimento(usuario: str, senha: str, headless: bool = False, debug: bool = True) -> None:
