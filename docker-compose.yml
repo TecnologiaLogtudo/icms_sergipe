@@ -21,6 +21,12 @@ services:
       - app_data:/app/data
       - app_logs:/app/logs
       - app_downloads:/app/downloads
+    healthcheck:
+      test: ["CMD", "python", "-c", "import os; import time; log_file='/app/logs/app.log'; print('OK') if os.path.exists(log_file) and (time.time() - os.path.getmtime(log_file) < 3600) else exit(1)"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
 
 volumes:
   app_data:
