@@ -13,6 +13,7 @@ from automacao.tratamento_planilha import (
     gerar_tabela_filtro_campos_st,
     remover_linha_final_bc_icms_st,
 )
+from automacao.smtp_notifier import enviar_alerta_campos_st
 
 
 MAPPINGS = carregar_mapeamento()
@@ -265,6 +266,7 @@ def _converter_html_para_xlsx_csv(caminho_arquivo: Path) -> None:
     print(f"✓ Conversão concluída: {caminho_csv.resolve()}")
     if not tabela_filtro_st.empty:
         print("✓ Aba adicional criada no .xlsx: filtro_campos_st")
+        enviar_alerta_campos_st(tabela_filtro_st, arquivo_origem=caminho_arquivo)
 
 
 def baixar_relatorio_conhecimento(usuario: str, senha: str, headless: bool = False, debug: bool = True) -> None:
