@@ -23,10 +23,19 @@ def setup_logging() -> None:
     level_name = os.getenv("LOG_LEVEL", "INFO").strip().upper()
     level = getattr(logging, level_name, logging.INFO)
 
+    log_dir = Path(os.getenv("LOG_DIR", "/app/logs"))
+    log_dir.mkdir(parents=True, exist_ok=True)
+    log_file = log_dir / "app.log"
+
+    handlers = [
+        logging.StreamHandler(sys.stdout),
+        logging.FileHandler(log_file, encoding="utf-8"),
+    ]
+
     logging.basicConfig(
         level=level,
         format=_LOG_FORMAT,
-        stream=sys.stdout,
+        handlers=handlers,
         force=True,
     )
 
