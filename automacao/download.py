@@ -362,7 +362,7 @@ def baixar_relatorio_conhecimento(usuario: str, senha: str, headless: bool = Fal
             # Clicar no botão "Gerar Relatório"
             logger.info("clicando_botao_gerar_relatorio")
             try:
-                page.locator(SEL_BOTAO_GERAR).wait_for(timeout=10000)
+                page.locator(SEL_BOTAO_GERAR).wait_for(timeout=30000)
                 paginas_antes = set(client.context.pages) if client.context else {page}
                 page.locator(SEL_BOTAO_GERAR).click()
 
